@@ -46,3 +46,31 @@ def test_limits_must_be_positive():
 def test_env_variables_are_read(monkeypatch):
     monkeypatch.setenv("ASE_MAX_FILES", "123")
     assert Settings(_env_file=None).max_files == 123
+
+
+def test_second_provider_is_optional_and_routes_the_build_step_by_default():
+    s = _settings()
+    assert s.llm2_stage_set == {"build"} and s.llm2_base_url is None
+
+
+def test_a_half_configured_second_provider_is_rejected():
+    with pytest.raises(ValidationError):
+        _settings(llm2_base_url="https://example.invalid/v1")
+
+
+def test_a_complete_second_provider_is_accepted():
+    s = _settings(
+        llm2_base_url="https://example.invalid/v1", llm2_model="m", llm2_api_key="not-a-real-key",
+        llm2_stages="audit, plan",
+    )  # fmt: skip
+    assert s.llm2_stage_set == {"audit", "plan"}
+
+
+def test_unknown_stage_names_are_rejected():
+    with pytest.raises(ValidationError):
+        _settings(llm2_stages="build,deploy")
+
+
+def test_labels_must_be_simple_names():
+    with pytest.raises(ValidationError):
+        _settings(llm_label="bad label!")

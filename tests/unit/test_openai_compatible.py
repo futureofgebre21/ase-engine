@@ -93,6 +93,19 @@ def test_success_sends_the_right_request_and_parses_usage():
     assert resp.cost_usd is None  # never estimated
 
 
+def test_the_label_names_the_provider_in_every_response():
+    server = _Server(body=_ok())
+    try:
+        provider = OpenAICompatibleProvider(
+            base_url=server.url, model="m", api_key=KEY, allow_insecure_localhost=True,
+            label="modal",
+        )  # fmt: skip
+        resp = provider.complete(_request())
+    finally:
+        server.close()
+    assert resp.provider == "modal" and provider.name == "modal" and provider.model_name == "m"
+
+
 def test_missing_usage_stays_unknown():
     server = _Server(body=_ok())
     try:

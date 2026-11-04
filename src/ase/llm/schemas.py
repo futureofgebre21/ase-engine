@@ -95,3 +95,13 @@ class RawModifyResult(BaseModel):
 class RawCreateResult(BaseModel):
     content: str
     notes: str = ""
+
+
+class RawFileEdits(BaseModel):
+    path: str
+    edits: list[RawEdit] = Field(default_factory=list)
+
+
+class RawRepair(BaseModel):
+    files: list[RawFileEdits] = Field(default_factory=list)
+    notes: str = ""

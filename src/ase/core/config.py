@@ -10,6 +10,10 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+STAGE_ORDER = ("audit", "plan", "build")  # steps that call an AI model, in pipeline order
+STAGES = frozenset(STAGE_ORDER)
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_prefix="ASE_", env_file=".env", extra="ignore", frozen=True
@@ -17,9 +21,17 @@ class Settings(BaseSettings):
 
     # --- LLM: "none" means no AI provider is configured (the app says so; it never fakes) ---
     llm_provider: Literal["none", "openai_compatible"] = "none"
+    llm_label: str = Field(default="llm", pattern=r"^[A-Za-z0-9_.-]{1,30}$")  # shown in the UI
     llm_base_url: str | None = None
     llm_model: str | None = None
     llm_api_key: SecretStr | None = None
+    # Optional second OpenAI-compatible provider (for example a Modal Endpoint). The stages named
+    # in llm2_stages use it; every other stage uses the first provider.
+    llm2_label: str = Field(default="llm2", pattern=r"^[A-Za-z0-9_.-]{1,30}$")
+    llm2_base_url: str | None = None
+    llm2_model: str | None = None
+    llm2_api_key: SecretStr | None = None
+    llm2_stages: str = "build"  # comma-separated subset of: audit, plan, build
     # Reasoning models spend output tokens thinking, so the limit must be generous.
     llm_max_output_tokens: int = Field(default=8_000, gt=0, le=64_000)
     llm_timeout_seconds: int = Field(default=300, gt=0, le=1_800)
@@ -67,7 +79,20 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"llm_provider='{self.llm_provider}' requires: {', '.join(missing)}"
                 )
+        second = (self.llm2_base_url, self.llm2_model, self.llm2_api_key)
+        if any(second) and not all(second):
+            raise ValueError(
+                "A second AI provider needs ASE_LLM2_BASE_URL, ASE_LLM2_MODEL and "
+                "ASE_LLM2_API_KEY together"
+            )
+        unknown = self.llm2_stage_set - STAGES
+        if unknown:
+            raise ValueError(f"ASE_LLM2_STAGES has unknown stage(s): {', '.join(sorted(unknown))}")
         return self
+
+    @property
+    def llm2_stage_set(self) -> frozenset[str]:
+        return frozenset(s.strip() for s in self.llm2_stages.split(",") if s.strip())
 
     @property
     def llm_configured(self) -> bool:

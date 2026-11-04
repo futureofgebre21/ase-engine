@@ -88,7 +88,8 @@ class BuildLimits:
         )
 
 
-def _write_atomic(build_dir: Path, rel: str, data: bytes) -> None:
+def write_atomic(build_dir: Path, rel: str, data: bytes) -> None:
+    """Write inside ``build_dir`` only; ``resolve_within`` rejects anything that would escape."""
     target = resolve_within(build_dir, rel)  # raises PathSafetyError if it would escape
     target.parent.mkdir(parents=True, exist_ok=True)
     temp = target.with_name(target.name + ".ase-tmp")
@@ -243,7 +244,7 @@ class Builder:
                 if status == "failed":
                     raise ChangeRejected(f"the generated code has a syntax error: {detail}")
                 old_text, newline, bom = original if original else (None, "\n", False)
-                _write_atomic(build_dir, change.path, encode_text(new_text, newline, bom))
+                write_atomic(build_dir, change.path, encode_text(new_text, newline, bom))
             except PathSafetyError:
                 return self._failed(change, "The target path is not allowed.", attempt), None
             except ChangeRejected as exc:

@@ -228,6 +228,32 @@ class BuildReport(BaseModel):
     limitations: list[str] = Field(default_factory=list)
 
 
+class VerifyRound(BaseModel):
+    index: int = Field(ge=1)
+    checks: list[CheckResult] = Field(default_factory=list)
+    outcome: Literal["passed", "failed", "unverified"]
+    unverified_reasons: list[str] = Field(default_factory=list)
+    repaired: list[BuiltChange] = Field(default_factory=list)  # changes made AFTER this round
+
+
+class VerifyReport(BaseModel):
+    rounds: list[VerifyRound] = Field(default_factory=list)
+    # passed: tests really ran and passed. failed: something really failed.
+    # unverified: nothing could be proven either way (never presented as success).
+    outcome: Literal["passed", "failed", "unverified"]
+    max_repair_attempts: int = Field(ge=0)
+    repair_attempts_used: int = Field(default=0, ge=0)
+    sandbox: str = ""
+    network_policy: str = ""
+    provider: str = ""
+    model: str = ""
+    model_calls: int = Field(default=0, ge=0)
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    generated_at: datetime = Field(default_factory=_now)
+    limitations: list[str] = Field(default_factory=list)
+
+
 class StateChange(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -255,6 +281,7 @@ class RunRecord(BaseModel):
     audit: AuditReport | None = None
     plan: Plan | None = None
     build: BuildReport | None = None
+    verification: VerifyReport | None = None
     approved_scope: list[str] = Field(default_factory=list)  # relative paths
     history: list[StateChange] = Field(default_factory=list)
     actions: list[ActionRecord] = Field(default_factory=list)

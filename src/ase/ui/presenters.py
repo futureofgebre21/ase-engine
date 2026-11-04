@@ -100,3 +100,41 @@ def change_rows(plan: Plan) -> list[dict[str, Any]]:
         }
         for c in plan.changes
     ]
+
+
+def _tokens(value: int | None) -> str:
+    return "unknown" if value is None else f"{value:,}"
+
+
+def _total(values: list[int | None]) -> int | None:
+    """A total is only reported when every part is known."""
+    return None if any(v is None for v in values) else sum(v for v in values if v is not None)
+
+
+def usage_rows(run: RunRecord) -> list[dict[str, Any]]:
+    """Which AI model each step really used, read from the recorded reports (never invented)."""
+    steps = (("2. Audit", run.audit), ("3. Plan", run.plan), ("4. Build", run.build))
+    used = [(name, report) for name, report in steps if report is not None]
+    rows: list[dict[str, Any]] = [
+        {
+            "Step": name,
+            "Provider": report.provider,
+            "Model": report.model,
+            "Model calls": report.model_calls,
+            "Tokens in": _tokens(report.prompt_tokens),
+            "Tokens out": _tokens(report.completion_tokens),
+        }
+        for name, report in used
+    ]
+    if len(used) > 1:
+        rows.append(
+            {
+                "Step": "Total",
+                "Provider": "",
+                "Model": "",
+                "Model calls": sum(report.model_calls for _, report in used),
+                "Tokens in": _tokens(_total([r.prompt_tokens for _, r in used])),
+                "Tokens out": _tokens(_total([r.completion_tokens for _, r in used])),
+            }
+        )
+    return rows

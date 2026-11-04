@@ -95,3 +95,19 @@ Each stage records its result on the run; a failed stage stops the pipeline.
 - Context per change: the target file, files cited by its findings, dependency files, and files
   written earlier in the same build. Plan and finding text is sent as untrusted data.
 - Prompt version: `build-v1` (`llm/prompts/build.py`).
+
+## 13. Step 5 notes
+- `execution/ecosystems.py` chooses fixed commands per ecosystem (Python: compile, install, pytest;
+  Node: npm install/ci, npm test). The model never writes a command. Unsupported ecosystems,
+  missing tests and sandbox problems produce `unverified`, never `passed`.
+- `execution/sandbox.py` is the only module that imports `modal`. It uploads the build copy
+  (no `.git`, dependency dirs, symlinks or sensitive files), restricts outbound network to the
+  ecosystem's registries with `outbound_domain_allowlist`, and refuses to run if that cannot be
+  applied. Output is redacted and bounded.
+- `agent/verifier.py` runs rounds; a failed round may trigger `agent/repair.py`, bounded by
+  `ASE_MAX_REPAIR_ATTEMPTS`, restricted to the plan's approved files, with the failure output sent
+  as untrusted data. A repair that cannot be applied ends the loop.
+- States: BUILT -> VERIFYING <-> REPAIRING -> COMPLETED (final status `completed_verified` or
+  `completed_unverified`) or FAILED.
+- Known limits: install scripts of dependencies run inside the sandbox; the Modal-specific code
+  needs a real account to test (`scripts/sandbox_selftest.py`).

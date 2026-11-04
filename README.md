@@ -4,27 +4,27 @@ An AI agent that imports or creates a software project, audits it with evidence,
 reviewable patches, verifies them in an isolated environment, and only pushes or deploys after
 explicit approval.
 
-**Status: steps 1-4 are real; steps 5-6 are not built yet.**
+**Status: steps 1-5 are real; step 6 (push and deploy) is not built yet.**
 
 Working today, automatically after you submit a public GitHub URL (any language):
 1. **Analyze and import**: hardened `git clone`, inventory (languages, ecosystems, manifests,
    tests, entry points, build/CI files, exclusions).
-2. **Audit**: AI review as senior software, DevOps and full-stack engineers. Every finding must
-   cite code that really exists; unverifiable findings are discarded and counted.
-3. **Architecture and plan**: AI design plus a list of changes. Code, not the model, validates
-   every change (safe paths, no secrets/generated/binary/.git targets, modify only files the
-   model was shown, every change tied to a real finding, every finding planned or deferred).
-4. **Build**: the planned changes are written into an isolated copy (`workspaces/build/<run>`);
-   the untouched clone (`workspaces/repos/<run>`) is the baseline for diffs and rollback.
-   Existing files change only by exact search-and-replace on their real text, so secrets that
-   were hidden from the model are never overwritten. Generated text is rejected if it contains
-   secrets, the redaction marker, or (for Python/JSON/TOML) a syntax error; a rejected attempt is
-   retried once with the reason. Every applied change is shown as a diff.
+2. **Audit**: AI review as senior software, DevOps and full-stack engineers; every finding must
+   cite code that really exists.
+3. **Architecture and plan**: AI design plus a change list, validated by code.
+4. **Build**: changes are written into an isolated copy; the untouched clone is the baseline.
+   Existing files change only by exact search-and-replace on their real text; generated text is
+   rejected if it contains secrets or (Python/JSON/TOML) a syntax error.
+5. **Test and verify**: the build copy runs in an isolated **Modal Sandbox** (network limited to
+   package registries, no secrets). Real exit codes decide the result. Failing checks trigger a
+   bounded repair loop that can edit only the files the plan approved. Results are **passed**,
+   **failed** or **unverified**; automatic verification supports Python and Node, everything
+   else is honestly reported as unverified. Needs `ASE_ALLOW_CODE_EXECUTION=true`.
 
-The result of step 4 is **built, not verified**: nothing has been run yet.
+AI models: Meta's Muse Spark Open, through Baseten and (optionally) Modal Endpoints. The UI
+shows which model each step really used. See `docs/HACKATHON.md`.
 
-Not built yet: test and verify in a sandbox (5), GitHub push and deploy (6). The app shows these
-tabs as "not built yet"; it has no fake buttons.
+Not built yet: GitHub push and deploy. The app shows that tab as "not built yet".
 
 Rules this project follows: no mock or demo data in the product (results come only from real
 repository files, real model replies and real command output); an unconfigured AI provider is
@@ -49,6 +49,12 @@ symlinks; on Windows they are skipped unless Developer Mode is enabled.
 ## Run the app
 ```bash
 streamlit run app/main.py
+```
+
+## Check the sandbox (once)
+```
+modal setup
+python scripts/sandbox_selftest.py
 ```
 
 ## Check quality

@@ -9,7 +9,14 @@ from __future__ import annotations
 import streamlit as st
 
 from ase.core.errors import AseError
-from ase.core.models import AuditReport, BuildReport, Plan, RepositoryInventory, RunRecord
+from ase.core.models import (
+    AuditReport,
+    BuildReport,
+    Plan,
+    RepositoryInventory,
+    RunRecord,
+    VerifyReport,
+)
 from ase.core.states import RunState, is_terminal
 from ase.services.project_service import EnvironmentStatus, ProjectService
 from ase.ui.presenters import (
@@ -22,6 +29,7 @@ from ase.ui.presenters import (
     run_row,
     short_id,
     state_label,
+    usage_rows,
 )
 
 TAB_TITLES = [
@@ -36,7 +44,6 @@ TAB_TITLES = [
 
 # (tab index, what the user should know right now)
 NOT_BUILT: dict[int, str] = {
-    5: "Not built yet. This step will run real tests in an isolated sandbox.",
     6: "Not built yet. Push and deploy are disabled: nothing can be sent to GitHub or a host.",
 }
 
@@ -45,6 +52,7 @@ _STAGE_LABELS = {
     "audit": "Step 2: audit",
     "plan": "Step 3: architecture and plan",
     "build": "Step 4: build",
+    "verify": "Step 5: test and verify",
 }
 _STATUS_ICONS = {"running": "...", "done": "done", "failed": "FAILED", "skipped": "skipped"}
 
@@ -67,6 +75,8 @@ def render_app(service: ProjectService) -> None:
         _plan_tab(service)
     with tabs[4]:
         _build_tab(service)
+    with tabs[5]:
+        _verify_tab(service)
     for index, message in NOT_BUILT.items():
         with tabs[index]:
             st.subheader(TAB_TITLES[index])
@@ -85,11 +95,13 @@ def _selected_run(service: ProjectService, *, needs: str) -> RunRecord | None:
 def _sidebar(env: EnvironmentStatus) -> None:
     with st.sidebar:
         st.subheader("Environment")
-        if env.llm_configured:
-            st.write(f"AI model: **{env.llm_model}**")
+        if env.routes:
+            st.write("AI model per step:")
+            for route in env.routes:
+                st.write(f"- {route.stage}: **{route.model or '?'}** via {route.provider}")
             st.caption("Taken from settings. Connectivity is checked when a step runs.")
-        else:
-            st.write("AI model: **not configured**")
+        if not env.llm_configured:
+            st.write("AI model: **not fully configured**")
         st.write("GitHub token: " + ("configured" if env.github_token_configured else "not set"))
         execution = "available" if env.code_execution_available else "unavailable"
         st.write(f"Code execution: {execution}")
@@ -104,7 +116,7 @@ def _dashboard(service: ProjectService) -> None:
         st.subheader("Import a GitHub repository")
         with st.form("pipeline_form", clear_on_submit=False):
             url = st.text_input("Repository URL", placeholder="https://github.com/owner/repo")
-            submitted = st.form_submit_button("Run steps 1-4 automatically")
+            submitted = st.form_submit_button("Run steps 1-5 automatically")
         st.caption("Public github.com repositories only. Code is read, never executed.")
         if submitted:
             _run_pipeline(service, url.strip())
@@ -144,10 +156,17 @@ def _run_pipeline(service: ProjectService, url: str) -> None:
         st.error(f"Stopped at {step}: {reason}")
     elif last is not None and last.exit_status == "error":
         st.error(f"Step failed ({last.name}): {last.summary}")
-    elif run.state is RunState.BUILT:
+    elif run.state is RunState.COMPLETED and run.final_status == "completed_verified":
         st.success(
-            f"Run {short_id(run.run_id)}: steps 1-4 completed. The code is built but NOT "
-            "verified yet (step 5 is not built)."
+            f"Run {short_id(run.run_id)}: built AND verified. The tests passed in the sandbox."
+        )
+    elif run.state is RunState.COMPLETED:
+        st.warning(
+            f"Run {short_id(run.run_id)}: built, but NOT fully verified. See 5. Test & Verify."
+        )
+    elif run.state is RunState.BUILT:
+        st.warning(
+            f"Run {short_id(run.run_id)}: the code is built but NOT verified (tests did not run)."
         )
     elif run.state is RunState.ANALYZED:
         st.info(f"Run {short_id(run.run_id)}: audit completed; there was nothing to plan.")
@@ -171,6 +190,10 @@ def _runs_section(service: ProjectService) -> None:
     st.session_state["selected_run"] = chosen
 
     st.markdown(f"**State:** {state_label(run.state)}  |  **Source:** {run.source or '-'}")
+    usage = usage_rows(run)
+    if usage:
+        st.markdown("**AI models used in this run** (from the recorded reports)")
+        st.dataframe(usage, hide_index=True, width="stretch")
     for item in run.limitations:
         st.warning(item)
     if run.history:
@@ -442,3 +465,88 @@ def _render_build(report: BuildReport) -> None:
         f"Provider: {report.provider} / {report.model} | prompt {report.prompt_version} | "
         f"tokens: {tokens_in} in, {tokens_out} out | cost: {cost}"
     )
+
+
+_OUTCOME_TEXT = {
+    "passed": ("success", "PASSED: the project's tests ran in the sandbox and passed."),
+    "failed": ("error", "FAILED: a check really failed and the bounded repairs did not fix it."),
+    "unverified": (
+        "warning",
+        "UNVERIFIED: ASE could not prove the code works. This is NOT a pass.",
+    ),
+}
+
+
+def _verify_tab(service: ProjectService) -> None:
+    st.subheader("Step 5: Test & Verify")
+    run = _selected_run(service, needs="inventory")
+    if run is None:
+        st.info("Import a repository first (Dashboard).")
+        return
+    st.caption(f"Run {short_id(run.run_id)} | {run.source} | {state_label(run.state)}")
+
+    if run.verification is not None:
+        _render_verification(run.verification)
+        return
+    if run.build is None:
+        st.info("The build (step 4) must finish first.")
+        return
+    env = service.environment_status()
+    if not env.code_execution_available:
+        st.warning(f"{env.code_execution_note}")
+        return
+    if run.state is RunState.BUILT:
+        if st.button("Run verification", key=f"verify_{run.run_id}"):
+            try:
+                with st.spinner("Running checks in the sandbox... this can take several minutes."):
+                    service.run_verify(run.run_id)
+            except AseError as exc:
+                st.error(f"Verification failed to start: {exc.message}")
+            else:
+                st.rerun()
+    else:
+        st.info("This run cannot be verified in its current state.")
+
+
+def _render_verification(report: VerifyReport) -> None:
+    kind, text = _OUTCOME_TEXT[report.outcome]
+    getattr(st, kind)(text)
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Rounds", len(report.rounds))
+    c2.metric("Repairs used", f"{report.repair_attempts_used} of {report.max_repair_attempts}")
+    c3.metric("Sandbox", report.sandbox or "-")
+    c4.metric("Model calls (repair)", report.model_calls)
+    st.caption(f"Network policy: {report.network_policy}")
+    for note in report.limitations:
+        st.caption(note)
+
+    for rnd in report.rounds:
+        st.markdown(f"**Round {rnd.index}: {rnd.outcome.upper()}**")
+        st.dataframe(
+            [
+                {
+                    "Check": c.name,
+                    "Command": c.command,
+                    "Result": c.status.value,
+                    "Exit code": "-" if c.exit_code is None else c.exit_code,
+                    "Seconds": "-" if c.duration_seconds is None else round(c.duration_seconds, 1),
+                }
+                for c in rnd.checks
+            ],
+            hide_index=True,
+            width="stretch",
+        )
+        for reason in rnd.unverified_reasons:
+            st.warning(reason)
+        for c in rnd.checks:
+            if c.output and c.status.value in ("failed", "passed"):
+                with st.expander(f"Output of {c.name} ({c.status.value})"):
+                    st.code(c.output, language=None)
+        if rnd.repaired:
+            st.markdown(f"Repair made after round {rnd.index}:")
+            for ch in rnd.repaired:
+                with st.expander(f"{ch.change_id} | {ch.status.upper()} | {ch.path}"):
+                    if ch.status == "applied":
+                        st.code(ch.diff or "(no diff)", language="diff")
+                    else:
+                        st.error(ch.reason)

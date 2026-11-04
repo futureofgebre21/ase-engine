@@ -77,3 +77,9 @@ class ChangeRejected(AseError):
     """A generated change failed a deterministic check and was not applied."""
 
     code = "change_rejected"
+
+
+class SandboxError(AseError):
+    """The isolated execution environment failed (not the code under test)."""
+
+    code = "sandbox_error"

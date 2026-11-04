@@ -12,6 +12,7 @@ dependencies = [
   "streamlit>=1.30",
   "pydantic>=2.5",
   "pydantic-settings>=2.1",
+  "modal>=1.0",
 ]
 
 [project.optional-dependencies]

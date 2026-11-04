@@ -38,8 +38,6 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class OpenAICompatibleProvider:
-    name = "openai_compatible"
-
     def __init__(
         self,
         *,
@@ -48,6 +46,7 @@ class OpenAICompatibleProvider:
         api_key: str,
         timeout_seconds: float = 300.0,
         allow_insecure_localhost: bool = False,
+        label: str = "openai_compatible",
     ) -> None:
         parts = urlsplit(base_url)
         host = (parts.hostname or "").lower()
@@ -68,6 +67,8 @@ class OpenAICompatibleProvider:
 
         self._url = base_url.rstrip("/") + "/chat/completions"
         self._model = model.strip()
+        self.name = label  # shown in reports and the UI, for example "baseten" or "modal"
+        self.model_name = self._model
         self._api_key = key
         self._timeout = timeout_seconds
         self._opener = urllib.request.build_opener(_NoRedirect)
